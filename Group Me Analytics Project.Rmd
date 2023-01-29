@@ -1,0 +1,212 @@
+---
+title: "High School Group Chat Summary"
+author: "Michael Ujevich"
+date: "June 24, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE, echo=FALSE}
+library(dplyr)
+library(ggplot2)
+```
+
+```{r, message=FALSE, echo = FALSE, warning = FALSE}
+messages <- jsonlite::fromJSON(txt = "your_text_file.txt") #downloaded JSON from GroupMe website of all data
+messages <- messages %>% select(created_at, favorited_by, name, sender_id, text, attachments)
+```
+
+```{r, message = FALSE, echo = FALSE, warning = FALSE}
+#parsedate package for converting date to yyyymmdd
+library(parsedate)
+messages <- messages %>% mutate(Date = parse_date(created_at))
+messages <- messages %>% select(Date, favorited_by, name, sender_id, text, attachments)
+messages <- messages %>% mutate(Year = substr(Date, 1, 4), Month = substr(Date, 6, 7), Day = substr(Date, 9, 10), Hour = substr(Date, 12, 13))
+
+#create metadata for each unique user
+messages <- messages %>% mutate(Member = ifelse(sender_id == 16163702, "Mack", ifelse(sender_id == 9322372, "Ant", ifelse(sender_id == 16163751, "Josey", ifelse(sender_id == 23715600, "Izzy", ifelse(sender_id == 15235926, "Bordo", ifelse(sender_id == 16163752, "Will", ifelse(sender_id == 16171699, "ZT", ifelse(sender_id == 16171700, "Jerry", "Gira")))))))))
+```
+
+# Heatmap of Texts:
+
+```{r, message = FALSE, echo = FALSE, warning = FALSE}
+#install.packages("remotes")
+#remotes::install_github("jbryer/makeR")
+
+messages$Date = as.Date(messages$Date, format = "%Y%m%d")
+calendar <- messages %>% group_by(Date) %>% summarise(Texts = n())
+
+library(makeR)
+library(plyr)
+
+calendarHeat(calendar$Date, calendar$Texts, ncolors = 99, color = "r2g", varname = "Group Texts by Day", date.form = "%Y-%m-%d")
+```
+
+# Bar Charts:
+
+```{r, echo = FALSE}
+#messages sent per day in each year
+messagesper <- messages %>% group_by(Year) %>%
+  summarise(Total_Texts = n()) %>% 
+  mutate(Texts_Per_Day = round(ifelse(Year == 2019, Total_Texts/175, ifelse(Year == 2014, Total_Texts/334, Total_Texts/365)),0))
+
+ggplot(messagesper, aes(Year, Texts_Per_Day)) + 
+  geom_bar(stat = "identity", fill = "deepskyblue1") +
+  theme_minimal() + 
+  ylab("Texts") + 
+  geom_text(aes(label = Texts_Per_Day, vjust = -.25)) +
+  ggtitle("Group Messages Sent Per Day Each Year") +
+  theme(panel.grid.major.x = element_blank())
+```
+
+```{r, echo = FALSE}
+#messages sent in each month, whilst removing all of 2019
+messagesday <- messages %>%
+  filter(Year != 2019) %>% 
+  group_by(Month) %>%
+  summarise(Total_Texts = n()) %>% 
+  mutate(Texts_Per_Day = round(ifelse(Month == 1 | Month == 3 | Month == 5 | Month == 7 | Month == 8 | Month == 10 | Month == 12, Total_Texts/31, ifelse(Month == 4 | Month == 6 | Month == 9 | Month == 11, Total_Texts/30, Total_Texts/28))))
+
+ggplot(messagesday, aes(Month, Texts_Per_Day)) + 
+  geom_bar(stat = "identity", fill = "deepskyblue1") +
+  theme_minimal() + 
+  ylab("Texts") + 
+  geom_text(aes(label = Texts_Per_Day, vjust = -.25)) +
+  ggtitle("Group Messages Sent Per Month") +
+  theme(panel.grid.major.x = element_blank())
+```
+
+```{r, echo= FALSE}
+#most texts by user
+user_texts <- messages %>% group_by(Member) %>% summarise(Texts = n()) %>% arrange(-Texts)
+
+ggplot(user_texts, aes(x = reorder(Member, -Texts), y = Texts)) + 
+  geom_bar(stat = "identity", fill = "deepskyblue1") +
+  theme_minimal() + 
+  xlab("User") +
+  geom_text(aes(label = Texts, vjust = -.25)) +
+  ggtitle("Group Messages Sent by User") + 
+  theme(panel.grid.major.x = element_blank())
+
+```
+
+```{r, echo = FALSE}
+#all names/total name changes by user
+allnames <- messages %>% group_by(Member, name) %>% summarise(Texts = n()) %>% select(Member, name, Texts)
+
+name_count <- allnames %>% group_by(Member) %>% summarise(Names = n()) %>% arrange(-Names)
+
+ggplot(name_count, aes(x = reorder(Member, -Names), y = Names)) + 
+  geom_bar(stat = "identity", fill = "deepskyblue1") +
+  theme_minimal() + 
+  xlab("User") +
+  geom_text(aes(label = Names, vjust = -.25)) +
+  ggtitle("Most Individual Name Changes") +
+  theme(panel.grid.major.x = element_blank())
+```
+
+```{r, echo = FALSE}
+#calculate a "liked message" rate by what proportion of each user's messages were liked
+only_likes <- messages %>% filter(favorited_by != "character(0)")
+likedmessages = 3822/56723
+only_likes <- only_likes %>% group_by(Member) %>% summarise(Liked_Messages = n())
+
+like_rates <- full_join(user_texts, only_likes, by = "Member") %>% mutate(Like_Rate = round((Liked_Messages / Texts),4))
+
+ggplot(like_rates, aes(x = reorder(Member, -Like_Rate), y = Like_Rate)) + 
+  geom_bar(stat = "identity", fill = "deepskyblue1") +
+  theme_minimal() + 
+  xlab("User") +
+  geom_text(aes(label = scales::percent(Like_Rate), vjust = -.25)) +
+  ggtitle("Percentage of User Messages That Were Liked") +
+  theme(panel.grid.major.x = element_blank())
+```
+
+```{r, message = FALSE, echo = FALSE}
+library(stringr)
+
+#total link shares
+user.messages <- messages %>%
+  filter(str_detect(text, "https"))
+
+user.messages <- user.messages %>% group_by(Member) %>% summarise(Link_Shares = n()) %>% arrange(-Link_Shares)
+
+ggplot(user.messages, aes(x = reorder(Member, -Link_Shares), y = Link_Shares)) + 
+  geom_bar(stat = "identity", fill = "deepskyblue1") +
+  theme_minimal() + 
+  xlab("User") +
+  ylab("Links Shared") +
+  geom_text(aes(label = Link_Shares, vjust = -.25)) +
+  ggtitle("Most Links Shared") +
+  theme(panel.grid.major.x = element_blank())
+```
+
+#Part of user profile:
+
+```{r, echo = FALSE}
+#eventual bar charts for each member by month
+userbymonth <- messages %>% group_by(Member, Year, Month) %>% summarise(Texts = n())
+```
+
+```{r, echo = FALSE}
+#all names/total name changes by user
+allnames <- messages %>% 
+  group_by(Member, name) %>% 
+  summarise(Texts = n()) %>%
+  select(Member, name, Texts)
+```
+
+```{r, echo = FALSE}
+#wordcloud
+library(wordcloud2)
+library(tidytext)
+
+words <- messages %>% select(Member, text)
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+#who liked each other's messages the most aka biggest fans
+library(scales)
+bigfans <- messages %>% mutate(Mack = ifelse(grepl("16163702", favorited_by), "Mack", as.character(favorited_by)), 
+                               Ant = ifelse(grepl("9322372", favorited_by), "Ant", as.character(favorited_by)),
+                               Josey = ifelse(grepl("16163751", favorited_by), "Josey", as.character(favorited_by)),
+                               Izzy = ifelse(grepl("23715600", favorited_by), "Izzy", as.character(favorited_by)),
+                               Bordo = ifelse(grepl("15235926", favorited_by), "Bordo", as.character(favorited_by)),
+                               Will = ifelse(grepl("16163752", favorited_by), "Will", as.character(favorited_by)),
+                               ZT = ifelse(grepl("16171699", favorited_by), "ZT", as.character(favorited_by)),
+                               Jerry = ifelse(grepl("16171700", favorited_by), "Jerry", as.character(favorited_by)),
+                               Gira = ifelse(grepl("16295545", favorited_by), "Gira", as.character(favorited_by)))
+
+bigfans <- bigfans %>% filter(favorited_by != "character(0)")
+
+liking_data <- do.call("rbind", list(mack_fans, will_fans, ant_fans, josey_fans, bordo_fans, zt_fans, gira_fans, izzy_fans, jerry_fans)) %>% select(Liker, Member, Like_Rate)
+```
+
+#### Mack
+
+```{r}
+#texts by month
+userbymonth
+
+#user names
+allnames
+
+#mack word cloud
+mack_words <- words %>%
+  filter(Member == "Mack") %>% 
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words) %>%
+  count(word, sort = TRUE) %>%
+  rename(count = n) %>% 
+  head(250)
+
+wordcloud2(mack_words, shape="square")
+
+#biggest fans
+mack_fans <- bigfans %>% filter(Mack == "Mack") %>% group_by(Member) %>% summarise(Likes = n())
+mack_fans <- inner_join(mack_fans, user_texts, by = "Member") %>% mutate(Like_Rate = Likes/Texts) %>% mutate(Liker = "Mack")
+mack_fans$Like_Rate = percent(mack_fans$Like_Rate)
+```
